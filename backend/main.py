@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 JOBS_ROOT = Path("/tmp/jobs")
-MAX_REPO_SIZE_BYTES = 50 * 1024 * 1024   # 50 MB
+MAX_REPO_SIZE_BYTES = 200 * 1024 * 1024   # 50 MB
 MAX_FILE_COUNT = 5000
 MAX_CLONE_TIMEOUT = 600                    # seconds
 MAX_CONCURRENT_CLONES = 2
