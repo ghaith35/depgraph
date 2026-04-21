@@ -4,7 +4,7 @@ from typing import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
-_GEMINI_MODEL = "gemini-2.0-flash"
+_GEMINI_MODEL = "gemini-1.5-flash"
 
 
 def _require_key() -> str:

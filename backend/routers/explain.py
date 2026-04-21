@@ -109,10 +109,9 @@ async def explain(job_id: str, file_path: str):
                 await asyncio.sleep(0)
 
         except RuntimeError as exc:
-            # GEMINI_API_KEY not set or similar config error
-            code = "AI_UNAVAILABLE"
+            logger.error("Gemini runtime error for %s: %s", file_path, exc)
             yield _sse("error", {
-                "code": code,
+                "code": "AI_UNAVAILABLE",
                 "message": (
                     "AI explanation is temporarily unavailable. "
                     "The dependency graph is unaffected."
@@ -122,6 +121,7 @@ async def explain(job_id: str, file_path: str):
 
         except Exception as exc:
             err_str = str(exc)
+            logger.exception("Gemini stream error for %s: %s", file_path, err_str)
             if full_parts:
                 yield _sse("ai.truncated", {
                     "message": "Explanation cut off. Click to retry.",

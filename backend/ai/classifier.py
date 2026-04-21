@@ -3,7 +3,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-_CLASSIFIER_MODEL = "gemini-2.0-flash"
+_CLASSIFIER_MODEL = "gemini-1.5-flash"
 _MAX_TEXT_CHARS = 4000
 
 
