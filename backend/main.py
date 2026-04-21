@@ -13,6 +13,7 @@ from typing import Optional
 import httpx
 import pathspec
 from fastapi import FastAPI, HTTPException
+from graph.builder import build_graph
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -415,23 +416,21 @@ async def analyze(body: AnalyzeRequest):
         # Stage 3 — discover files
         files = await asyncio.to_thread(discover_files, repo_dest)
 
-        # Aggregate response
-        total_size = sum(f.size for f in files)
-        languages: dict[str, int] = {}
-        for f in files:
-            languages[f.language_hint] = languages.get(f.language_hint, 0) + 1
-        languages = dict(sorted(languages.items(), key=lambda x: -x[1]))
+        # Stage 4 — parse + build graph
+        graph = await asyncio.to_thread(build_graph, repo_dest, files)
 
+        total_size = sum(f.size for f in files)
         logger.info(
-            "Analysis complete job_id=%s files=%d size=%d commit=%s",
-            job_id, len(files), total_size, commit_sha,
+            "Analysis complete job_id=%s files=%d nodes=%d edges=%d commit=%s",
+            job_id, len(files), len(graph["nodes"]), len(graph["edges"]), commit_sha,
         )
         return {
             "job_id": job_id,
             "commit_sha": commit_sha,
             "file_count": len(files),
             "total_size_bytes": total_size,
-            "languages": languages,
+            "nodes": graph["nodes"],
+            "edges": graph["edges"],
         }
 
     except HTTPException:
