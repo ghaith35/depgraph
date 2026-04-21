@@ -1,5 +1,6 @@
 import * as d3 from "d3";
 import { useEffect, useRef } from "react";
+import { buildClusterCentroids, makeClusterForce } from "../graph/clustering";
 import { languageColor, nodeRadius } from "../graph/colors";
 import { createSimulation, updateChargeStrength } from "../graph/simulation";
 import { Edge, Node } from "../graph/types";
@@ -141,6 +142,17 @@ export function GraphCanvas({
 
     updateChargeStrength(sim, nodes.length);
 
+    // Add cluster force for 300+ nodes; reduce charge to avoid double repulsion
+    if (nodes.length >= 300) {
+      const w = svgRef.current?.clientWidth || 800;
+      const h = svgRef.current?.clientHeight || 600;
+      const centroids = buildClusterCentroids(nodes, w, h);
+      sim.force("cluster", makeClusterForce(centroids, 0.15));
+      (sim.force("charge") as d3.ForceManyBody<Node>).strength(-150);
+    } else {
+      sim.force("cluster", null);
+    }
+
     const drag = d3
       .drag<SVGGElement, Node>()
       .on("start", (event, d) => {
@@ -236,13 +248,20 @@ export function GraphCanvas({
       .text((d) => d.label);
 
     // r + fill for all nodes (enter + existing); stroke handled by Effect 3
-    g.select<SVGGElement>(".nodes")
-      .selectAll<SVGGElement, Node>("g.node-group")
+    const allNodes = g.select<SVGGElement>(".nodes")
+      .selectAll<SVGGElement, Node>("g.node-group");
+
+    allNodes
       .select("circle")
       .attr("r", (d) => nodeRadius(d))
       .attr("fill", (d) => languageColor(d.language))
       .attr("stroke", "#fff")
       .attr("stroke-width", 1.5);
+
+    // Hide labels for dense graphs (tooltip handles hover info)
+    allNodes
+      .select("text")
+      .style("display", nodes.length > 300 ? "none" : "block");
 
     // Feed updated arrays to simulation — gentle nudge (not full reheat)
     sim.nodes(nodes);

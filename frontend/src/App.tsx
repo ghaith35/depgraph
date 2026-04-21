@@ -1,9 +1,9 @@
 import { useCallback, useState } from "react";
-import { GraphCanvas } from "./components/GraphCanvas";
-import { LanguageLegend } from "./components/LanguageLegend";
+import { GraphView } from "./components/GraphView";
 import { NodeTooltip } from "./components/NodeTooltip";
 import { ProgressBar } from "./components/ProgressBar";
 import { Sidebar } from "./components/Sidebar";
+import { DEFAULT_FILTERS, FilterState } from "./graph/filters";
 import { Node } from "./graph/types";
 import { useAnalysis } from "./hooks/useAnalysis";
 
@@ -15,6 +15,7 @@ export default function App() {
   const [highlightedNodes, setHighlightedNodes] = useState<Set<string> | null>(
     null,
   );
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
   const { state, analyze } = useAnalysis();
   const {
@@ -141,32 +142,24 @@ export default function App() {
 
       {/* ── Body ── */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        {/* Canvas */}
-        <div
-          style={{ flex: 1, position: "relative", overflow: "hidden" }}
-        >
+        {/* Canvas area with progress bar overlay */}
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
           <ProgressBar
             loading={loading}
             statusMsg={statusMsg}
             progress={progress}
           />
 
-          <GraphCanvas
+          <GraphView
             nodes={nodes}
             edges={edges}
+            filters={filters}
+            onFiltersChange={setFilters}
             selectedNodeId={selectedNodeId}
             highlightedNodes={highlightedNodes}
             onSelectNode={setSelectedNodeId}
             onHoverNode={handleHoverNode}
           />
-
-          {nodes.length > 0 && (
-            <div
-              style={{ position: "absolute", bottom: 12, left: 12, zIndex: 5 }}
-            >
-              <LanguageLegend nodes={nodes} />
-            </div>
-          )}
         </div>
 
         {/* Sidebar */}
@@ -182,7 +175,7 @@ export default function App() {
         />
       </div>
 
-      {/* Tooltip — rendered outside canvas so it's not clipped */}
+      {/* Tooltip rendered outside everything so it's never clipped */}
       <NodeTooltip node={hoveredNode} x={mousePos.x} y={mousePos.y} />
     </div>
   );
