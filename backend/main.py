@@ -28,7 +28,7 @@ from app.schemas import (
     AnalysisResult, CycleReport, Edge, Graph, Node, RepoStats, SetupSteps,
 )
 from pipeline.job import Job
-from pipeline.manager import StreamJobManager
+from pipeline.manager import StreamJobManager, stream_jobs as _stream_jobs_singleton
 from routers.explain import router as explain_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -346,8 +346,8 @@ class FsJobManager:
 fs_jobs = FsJobManager()
 atexit.register(fs_jobs.cleanup_all)
 
-# In-memory SSE job registry
-stream_jobs = StreamJobManager()
+# In-memory SSE job registry — use the module-level singleton so routers share the same instance
+stream_jobs = _stream_jobs_singleton
 
 # ---------------------------------------------------------------------------
 # FastAPI app
