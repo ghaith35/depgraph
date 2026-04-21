@@ -8,7 +8,7 @@ _GEMINI_MODEL = "gemini-1.5-flash"
 
 
 def _require_key() -> str:
-    key = os.environ.get("GEMINI_API_KEY", "")
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
     if not key:
         raise RuntimeError("GEMINI_API_KEY environment variable is not set")
     return key

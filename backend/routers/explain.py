@@ -112,10 +112,7 @@ async def explain(job_id: str, file_path: str):
             logger.error("Gemini runtime error for %s: %s", file_path, exc)
             yield _sse("error", {
                 "code": "AI_UNAVAILABLE",
-                "message": (
-                    "AI explanation is temporarily unavailable. "
-                    "The dependency graph is unaffected."
-                ),
+                "message": f"AI unavailable: {exc}",
             })
             return
 
@@ -130,10 +127,7 @@ async def explain(job_id: str, file_path: str):
                 code = "RATE_LIMITED" if "429" in err_str else "AI_UNAVAILABLE"
                 yield _sse("error", {
                     "code": code,
-                    "message": (
-                        "AI explanation is temporarily unavailable. "
-                        "The dependency graph is unaffected."
-                    ),
+                    "message": f"AI error: {err_str}",
                 })
             return
 
