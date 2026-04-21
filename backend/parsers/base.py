@@ -1,33 +1,34 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from graph.context import RepoContext
 
 
 @dataclass
 class RawImport:
-    module: str           # e.g. "os.path", "..utils.helpers", "."
-    is_relative: bool
-    symbol: Optional[str] # first imported name, e.g. "Path" from "from pathlib import Path"
-    line: int             # 1-based source line
+    module: str            # e.g. "os.path", "..utils.helpers", "./utils", "crate::foo"
+    is_relative: bool      # starts with . (Python/JS) or self/super/crate (Rust)
+    symbol: Optional[str]  # first imported name for symbol annotation
+    line: int              # 1-based source line
+    is_dynamic: bool = False          # import() with template string
+    target_pattern: Optional[str] = None  # e.g. "./locales/*.js"
 
 
 class LanguageHandler(ABC):
+    language_name: str
+
     @abstractmethod
     def extract_imports(self, source_bytes: bytes) -> tuple[list[RawImport], bool]:
-        """
-        Parse source_bytes and return (imports, parse_error).
-        parse_error=True means the file had parse errors but we still tried.
-        """
+        """Return (imports, parse_error)."""
 
     @abstractmethod
     def resolve_import(
         self,
         raw: RawImport,
         file_path: str,
-        repo_root: Path,
+        ctx: "RepoContext",
     ) -> Optional[str]:
-        """
-        Resolve a raw import to a relative file path within the repo.
-        Returns None if the import is external / unresolvable.
-        """
+        """Resolve to a repo-relative file path, or None if external/unresolvable."""

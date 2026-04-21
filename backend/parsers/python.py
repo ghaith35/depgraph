@@ -95,8 +95,9 @@ class PythonHandler(LanguageHandler):
         self,
         raw: RawImport,
         file_path: str,
-        repo_root: Path,
+        ctx,
     ) -> Optional[str]:
+        repo_root = ctx.repo_root
         if raw.is_relative:
             return _resolve_relative(raw.module, file_path, repo_root)
         return _resolve_absolute(raw.module, repo_root)
