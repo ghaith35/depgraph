@@ -1,10 +1,14 @@
+import json
 import logging
 import os
 from typing import AsyncIterator
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 _GEMINI_MODEL = "gemini-1.5-flash"
+_API_BASE = "https://generativelanguage.googleapis.com/v1/models"
 
 
 def _require_key() -> str:
@@ -18,26 +22,31 @@ async def stream_explanation(
     system_prompt: str,
     user_prompt: str,
 ) -> AsyncIterator[str]:
-    from google import genai
-    from google.genai import types
-
     api_key = _require_key()
-    client = genai.Client(api_key=api_key)
+    url = f"{_API_BASE}/{_GEMINI_MODEL}:streamGenerateContent?key={api_key}&alt=sse"
 
-    config = types.GenerateContentConfig(
-        system_instruction=system_prompt,
-        max_output_tokens=1500,
-        temperature=0.3,
-    )
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {"maxOutputTokens": 1500, "temperature": 0.3},
+    }
 
-    async for chunk in client.aio.models.generate_content_stream(
-        model=_GEMINI_MODEL,
-        contents=user_prompt,
-        config=config,
-    ):
-        try:
-            text = chunk.text
-            if text:
-                yield text
-        except Exception:
-            continue
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        async with client.stream("POST", url, json=payload) as response:
+            if response.status_code != 200:
+                body = await response.aread()
+                raise RuntimeError(f"Gemini API error {response.status_code}: {body.decode()[:200]}")
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data_str = line[5:].strip()
+                if not data_str:
+                    continue
+                try:
+                    chunk = json.loads(data_str)
+                    text = chunk["candidates"][0]["content"]["parts"][0]["text"]
+                    if text:
+                        yield text
+                except (KeyError, IndexError, json.JSONDecodeError):
+                    continue
