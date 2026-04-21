@@ -1,0 +1,17 @@
+name: Warmup
+
+on:
+  schedule:
+    # Every 14 minutes — keeps Render free-tier instance from sleeping
+    - cron: "*/14 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        run: |
+          curl -sf --max-time 10 https://depgraph.onrender.com/healthz \
+            && echo "Backend awake" \
+            || echo "Backend cold (expected on first ping after sleep)"
