@@ -165,5 +165,6 @@ async def explain(job_id: str, file_path: str):
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
         },
     )
