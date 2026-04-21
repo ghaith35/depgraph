@@ -1,0 +1,319 @@
+{
+  "$defs": {
+    "CycleReport": {
+      "properties": {
+        "scc_count": {
+          "title": "Scc Count",
+          "type": "integer"
+        },
+        "node_count_in_cycles": {
+          "title": "Node Count In Cycles",
+          "type": "integer"
+        },
+        "edge_count_in_cycles": {
+          "title": "Edge Count In Cycles",
+          "type": "integer"
+        },
+        "sccs": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Sccs",
+          "type": "array"
+        },
+        "simple_cycles": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Simple Cycles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scc_count",
+        "node_count_in_cycles",
+        "edge_count_in_cycles",
+        "sccs",
+        "simple_cycles"
+      ],
+      "title": "CycleReport",
+      "type": "object"
+    },
+    "Edge": {
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symbol"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "is_cycle": {
+          "default": false,
+          "title": "Is Cycle",
+          "type": "boolean"
+        },
+        "has_dynamic_target": {
+          "default": false,
+          "title": "Has Dynamic Target",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "type",
+        "line"
+      ],
+      "title": "Edge",
+      "type": "object"
+    },
+    "Graph": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/Node"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/Edge"
+          },
+          "title": "Edges",
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "title": "Graph",
+      "type": "object"
+    },
+    "Node": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "is_cycle": {
+          "default": false,
+          "title": "Is Cycle",
+          "type": "boolean"
+        },
+        "cluster": {
+          "title": "Cluster",
+          "type": "string"
+        },
+        "parse_error": {
+          "default": false,
+          "title": "Parse Error",
+          "type": "boolean"
+        },
+        "is_outlier_hub": {
+          "default": false,
+          "title": "Is Outlier Hub",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "language",
+        "size",
+        "cluster"
+      ],
+      "title": "Node",
+      "type": "object"
+    },
+    "RepoStats": {
+      "properties": {
+        "file_count": {
+          "title": "File Count",
+          "type": "integer"
+        },
+        "total_size_bytes": {
+          "title": "Total Size Bytes",
+          "type": "integer"
+        },
+        "total_loc": {
+          "title": "Total Loc",
+          "type": "integer"
+        },
+        "languages": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Languages",
+          "type": "object"
+        },
+        "commit_sha": {
+          "title": "Commit Sha",
+          "type": "string"
+        },
+        "repo_url": {
+          "title": "Repo Url",
+          "type": "string"
+        },
+        "analysis_duration_ms": {
+          "title": "Analysis Duration Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file_count",
+        "total_size_bytes",
+        "total_loc",
+        "languages",
+        "commit_sha",
+        "repo_url",
+        "analysis_duration_ms"
+      ],
+      "title": "RepoStats",
+      "type": "object"
+    },
+    "SetupSteps": {
+      "properties": {
+        "runtime": {
+          "title": "Runtime",
+          "type": "string"
+        },
+        "install_cmd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Install Cmd"
+        },
+        "build_cmd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Cmd"
+        },
+        "run_cmd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Cmd"
+        },
+        "env_vars": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Env Vars",
+          "type": "array"
+        },
+        "notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "runtime"
+      ],
+      "title": "SetupSteps",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "stats": {
+      "$ref": "#/$defs/RepoStats"
+    },
+    "graph": {
+      "$ref": "#/$defs/Graph"
+    },
+    "cycles": {
+      "$ref": "#/$defs/CycleReport"
+    },
+    "setup": {
+      "$ref": "#/$defs/SetupSteps"
+    },
+    "unresolved_imports_count": {
+      "default": 0,
+      "title": "Unresolved Imports Count",
+      "type": "integer"
+    },
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "job_id",
+    "stats",
+    "graph",
+    "cycles",
+    "setup"
+  ],
+  "title": "AnalysisResult",
+  "type": "object"
+}

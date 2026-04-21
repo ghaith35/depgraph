@@ -1,0 +1,7 @@
+{
+  "name": "my-app",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  }
+}

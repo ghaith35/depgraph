@@ -10,12 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import time
 import httpx
 import pathspec
 from fastapi import FastAPI, HTTPException
-from graph.builder import build_graph
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from graph.builder import build_graph
+from graph.cycles import build_digraph, detect_cycles, annotate_graph
+from graph.setup import generate_setup
+from app.schemas import AnalysisResult, Graph, Node, Edge, RepoStats, CycleReport, SetupSteps
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -399,11 +403,12 @@ class AnalyzeRequest(BaseModel):
     url: str
 
 
-@app.post("/analyze")
-async def analyze(body: AnalyzeRequest):
+@app.post("/analyze", response_model=AnalysisResult)
+async def analyze(body: AnalyzeRequest) -> AnalysisResult:
     job_id = str(uuid.uuid4())
     job_dir = job_manager.create_job_dir(job_id)
     repo_dest = job_dir / "repo"
+    t_start = time.monotonic()
 
     try:
         # Stage 1 — validate URL
@@ -416,22 +421,54 @@ async def analyze(body: AnalyzeRequest):
         # Stage 3 — discover files
         files = await asyncio.to_thread(discover_files, repo_dest)
 
-        # Stage 4 — parse + build graph
-        graph = await asyncio.to_thread(build_graph, repo_dest, files)
+        # Stage 4 — parse + build graph (raw dicts)
+        raw = await asyncio.to_thread(build_graph, repo_dest, files)
+        nodes_d: list[dict] = raw["nodes"]
+        edges_d: list[dict] = raw["edges"]
 
+        # Stage 5 — cycle detection
+        G = build_digraph(nodes_d, edges_d)
+        cycle_report, cycle_node_ids, cycle_edge_pairs = detect_cycles(G)
+        annotate_graph(nodes_d, edges_d, cycle_node_ids, cycle_edge_pairs)
+
+        # Stage 6 — setup instructions
+        all_file_paths = {f.path for f in files}
+        setup = await asyncio.to_thread(generate_setup, repo_dest, all_file_paths)
+
+        # Stage 7 — stats
         total_size = sum(f.size for f in files)
+        total_loc = sum(n.get("size", 0) * 20 for n in nodes_d)  # reverse LOC/20
+        lang_counts: dict[str, int] = {}
+        for f in files:
+            lang_counts[f.language_hint] = lang_counts.get(f.language_hint, 0) + 1
+
+        duration_ms = int((time.monotonic() - t_start) * 1000)
+
         logger.info(
-            "Analysis complete job_id=%s files=%d nodes=%d edges=%d commit=%s",
-            job_id, len(files), len(graph["nodes"]), len(graph["edges"]), commit_sha,
+            "Analysis complete job_id=%s files=%d nodes=%d edges=%d cycles=%d commit=%s duration=%dms",
+            job_id, len(files), len(nodes_d), len(edges_d),
+            cycle_report.scc_count, commit_sha, duration_ms,
         )
-        return {
-            "job_id": job_id,
-            "commit_sha": commit_sha,
-            "file_count": len(files),
-            "total_size_bytes": total_size,
-            "nodes": graph["nodes"],
-            "edges": graph["edges"],
-        }
+
+        return AnalysisResult(
+            job_id=job_id,
+            stats=RepoStats(
+                file_count=len(files),
+                total_size_bytes=total_size,
+                total_loc=total_loc,
+                languages=lang_counts,
+                commit_sha=commit_sha,
+                repo_url=vr.url,
+                analysis_duration_ms=duration_ms,
+            ),
+            graph=Graph(
+                nodes=[Node(**n) for n in nodes_d],
+                edges=[Edge(**e) for e in edges_d],
+            ),
+            cycles=cycle_report,
+            setup=setup,
+            unresolved_imports_count=0,
+        )
 
     except HTTPException:
         raise
@@ -439,5 +476,4 @@ async def analyze(body: AnalyzeRequest):
         logger.exception("Unexpected error job_id=%s", job_id)
         raise HTTPException(500, f"Internal error: {exc}")
     finally:
-        # Always clean up — success or failure
         job_manager.cleanup(job_id)
