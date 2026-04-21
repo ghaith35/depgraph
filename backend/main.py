@@ -29,6 +29,7 @@ from app.schemas import (
 )
 from pipeline.job import Job
 from pipeline.manager import StreamJobManager
+from routers.explain import router as explain_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -361,6 +362,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(explain_router)
+
 
 @app.on_event("startup")
 async def on_startup() -> None:
@@ -481,7 +484,7 @@ async def _run_pipeline(job: Job, url: str, job_dir: Path) -> None:
             lang_counts[f.language_hint] = lang_counts.get(f.language_hint, 0) + 1
         duration_ms = int((time.monotonic() - t_start) * 1000)
 
-        await put("stats", {
+        stats_payload = {
             "file_count": len(files),
             "total_size_bytes": total_size,
             "total_loc": 0,
@@ -489,10 +492,24 @@ async def _run_pipeline(job: Job, url: str, job_dir: Path) -> None:
             "commit_sha": commit_sha,
             "repo_url": vr.url,
             "analysis_duration_ms": duration_ms,
-        })
+        }
+        await put("stats", stats_payload)
 
         await put("done", {"job_id": job.job_id})
         job.status = "done"
+
+        # Store full AnalysisResult and repo path so /explain can access them
+        job.analysis_result = AnalysisResult(
+            job_id=job.job_id,
+            stats=RepoStats(**stats_payload),
+            graph=Graph(
+                nodes=[Node(**nd) for nd in nodes_list],
+                edges=[Edge(**ed) for ed in edges_list],
+            ),
+            cycles=cycle_report,
+            setup=setup,
+        )
+        job.repo_dir = repo_dest
 
         logger.info(
             "Pipeline done job_id=%s files=%d nodes=%d edges=%d cycles=%d duration=%dms",
@@ -513,10 +530,16 @@ async def _run_pipeline(job: Job, url: str, job_dir: Path) -> None:
             await asyncio.wait_for(job.queue.put(None), timeout=5.0)
         except asyncio.TimeoutError:
             pass
-        fs_jobs.cleanup(job.job_id)
-        # Keep the job in stream_jobs for 30 s so the client can drain the queue
-        await asyncio.sleep(30)
-        stream_jobs.remove(job.job_id)
+
+        if job.status == "done":
+            # Keep repo_dir alive for /explain; eviction handles FS + memory cleanup
+            await asyncio.sleep(30)  # drain SSE stream
+            # Intentionally not removing from stream_jobs here
+        else:
+            # Error path: clean up immediately
+            fs_jobs.cleanup(job.job_id)
+            await asyncio.sleep(30)
+            stream_jobs.remove(job.job_id)
 
 
 # ---------------------------------------------------------------------------

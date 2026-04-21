@@ -1,4 +1,5 @@
 import logging
+import shutil
 import time
 from typing import Optional
 
@@ -22,7 +23,9 @@ class StreamJobManager:
         return self._jobs.get(job_id)
 
     def remove(self, job_id: str) -> None:
-        self._jobs.pop(job_id, None)
+        job = self._jobs.pop(job_id, None)
+        if job:
+            _cleanup_job_fs(job)
 
     def evict_expired(self) -> None:
         now = time.monotonic()
@@ -32,7 +35,19 @@ class StreamJobManager:
         ]
         for jid in expired:
             logger.info("Evicting expired job %s", jid)
-            self._jobs.pop(jid, None)
+            job = self._jobs.pop(jid, None)
+            if job:
+                _cleanup_job_fs(job)
+
+
+def _cleanup_job_fs(job: Job) -> None:
+    if job.repo_dir:
+        job_dir = job.repo_dir.parent  # /tmp/jobs/{job_id}/
+        try:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            logger.debug("Cleaned FS for job %s", job.job_id)
+        except Exception:
+            pass
 
 
 stream_jobs = StreamJobManager()

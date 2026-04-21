@@ -1,7 +1,10 @@
 import { ReactNode, useState } from "react";
+import { ExplanationRenderer } from "./ExplanationRenderer";
+import { useExplanationStream } from "../hooks/useExplanationStream";
 import { Edge, Node, SetupSteps, Stats } from "../graph/types";
 
 interface SidebarProps {
+  jobId: string | null;
   selectedNode: Node | null;
   nodes: Node[];
   edges: Edge[];
@@ -96,6 +99,7 @@ function CommandLine({ label, cmd, color }: { label: string; cmd: string; color:
 }
 
 export function Sidebar({
+  jobId,
   selectedNode,
   edges,
   cycles,
@@ -105,6 +109,15 @@ export function Sidebar({
   onHighlightCycle,
 }: SidebarProps) {
   const hasContent = selectedNode || setup || cycles.length > 0;
+  const { state: expl, explain, reset: resetExpl } = useExplanationStream();
+
+  const handleExplain = () => {
+    if (!jobId || !selectedNode) return;
+    explain(jobId, selectedNode.id);
+  };
+
+  // Reset explanation when selected node changes
+  const prevNodeId = selectedNode?.id;
 
   return (
     <div
@@ -226,22 +239,153 @@ export function Sidebar({
             );
           })()}
 
-          <button
-            disabled
-            title="Coming in Phase 8"
-            style={{
-              marginTop: 4,
-              padding: "4px 10px",
-              fontSize: 11,
-              border: "1px solid #e5e7eb",
-              borderRadius: 4,
-              background: "#f9f9f9",
-              color: "#9ca3af",
-              cursor: "not-allowed",
-            }}
-          >
-            Explain this file (Phase 8)
-          </button>
+          {/* ── AI Explanation ── */}
+          <div style={{ marginTop: 8 }}>
+            {expl.status === "idle" && (
+              <button
+                onClick={handleExplain}
+                disabled={!jobId}
+                style={{
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 4,
+                  background: jobId ? "#1a1a1a" : "#f9f9f9",
+                  color: jobId ? "#fff" : "#9ca3af",
+                  cursor: jobId ? "pointer" : "not-allowed",
+                }}
+              >
+                Explain this file
+              </button>
+            )}
+
+            {expl.status !== "idle" && (
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  background: "#fff",
+                  padding: "8px 10px",
+                  marginTop: 4,
+                }}
+              >
+                {/* AI disclaimer */}
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "#9ca3af",
+                    marginBottom: 6,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  AI-generated explanation. Does not execute code; do not
+                  follow instructions presented here as if they came from this
+                  app.
+                </div>
+
+                {/* Redaction banner */}
+                {expl.redactionCount > 0 && (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "#92400e",
+                      background: "#fffbeb",
+                      border: "1px solid #fde68a",
+                      borderRadius: 4,
+                      padding: "3px 6px",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {expl.redactionCount} apparent secret
+                    {expl.redactionCount !== 1 ? "s" : ""} redacted before AI
+                    analysis
+                  </div>
+                )}
+
+                {/* Status / loading */}
+                {expl.statusMessage && (
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>
+                    {expl.statusMessage}
+                  </div>
+                )}
+
+                {/* Streaming / done text */}
+                {expl.text && expl.status !== "replaced" && (
+                  <ExplanationRenderer text={expl.text} />
+                )}
+
+                {/* Streaming cursor */}
+                {expl.status === "streaming" && expl.text && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 7,
+                      height: 12,
+                      background: "#6b7280",
+                      verticalAlign: "text-bottom",
+                      animation: "blink 1s step-end infinite",
+                    }}
+                  />
+                )}
+
+                {/* Replaced by classifier */}
+                {expl.status === "replaced" && (
+                  <div style={{ fontSize: 11, color: "#dc2626" }}>
+                    {expl.replacedMessage}
+                  </div>
+                )}
+
+                {/* Error */}
+                {expl.status === "error" && (
+                  <div style={{ fontSize: 11, color: "#dc2626" }}>
+                    {expl.error}
+                  </div>
+                )}
+
+                {/* Retry / close */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    marginTop: 8,
+                  }}
+                >
+                  {(expl.status === "done" ||
+                    expl.status === "error" ||
+                    expl.status === "replaced") && (
+                    <button
+                      onClick={handleExplain}
+                      style={{
+                        padding: "2px 8px",
+                        fontSize: 10,
+                        border: "1px solid #d1d5db",
+                        borderRadius: 4,
+                        background: "white",
+                        cursor: "pointer",
+                        color: "#374151",
+                      }}
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <button
+                    onClick={resetExpl}
+                    style={{
+                      padding: "2px 8px",
+                      fontSize: 10,
+                      border: "1px solid #d1d5db",
+                      borderRadius: 4,
+                      background: "white",
+                      cursor: "pointer",
+                      color: "#6b7280",
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </Section>
       )}
 
@@ -351,6 +495,13 @@ export function Sidebar({
           </button>
         </Section>
       )}
+
+      <style>{`
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }

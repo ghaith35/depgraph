@@ -13,6 +13,7 @@ export interface AnalysisState {
   cycles: string[][];
   setup: SetupSteps | null;
   stats: Stats | null;
+  jobId: string | null;
 }
 
 const INITIAL: AnalysisState = {
@@ -25,6 +26,7 @@ const INITIAL: AnalysisState = {
   cycles: [],
   setup: null,
   stats: null,
+  jobId: null,
 };
 
 export function useAnalysis() {
@@ -76,6 +78,8 @@ export function useAnalysis() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail ?? `HTTP ${res.status}`);
+
+        setState((p) => ({ ...p, jobId: data.job_id }));
 
         const es = new EventSource(`${API}/stream/${data.job_id}`);
         esRef.current = es;

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { GraphView } from "./components/GraphView";
 import { NodeTooltip } from "./components/NodeTooltip";
 import { ProgressBar } from "./components/ProgressBar";
@@ -17,6 +17,9 @@ export default function App() {
   );
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
+  const API = import.meta.env.VITE_API_URL ?? "/api";
+  const prewarmRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { state, analyze } = useAnalysis();
   const {
     loading,
@@ -28,6 +31,7 @@ export default function App() {
     cycles,
     setup,
     stats,
+    jobId,
   } = state;
 
   const selectedNode = selectedNodeId
@@ -88,7 +92,23 @@ export default function App() {
             required
             placeholder="https://github.com/psf/requests"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              // Pre-warm backend: fire a cheap GET /healthz debounced 500ms
+              // after the user pastes a plausible repo URL, so the instance
+              // is awake before they click Analyse.
+              if (prewarmRef.current) clearTimeout(prewarmRef.current);
+              const val = e.target.value;
+              if (
+                val.startsWith("https://github.com/") ||
+                val.startsWith("https://gitlab.com/") ||
+                val.startsWith("https://bitbucket.org/")
+              ) {
+                prewarmRef.current = setTimeout(() => {
+                  fetch(`${API}/healthz`).catch(() => {});
+                }, 500);
+              }
+            }}
             style={{
               flex: 1,
               padding: "5px 10px",
@@ -164,6 +184,7 @@ export default function App() {
 
         {/* Sidebar */}
         <Sidebar
+          jobId={jobId}
           selectedNode={selectedNode}
           nodes={nodes}
           edges={edges}
