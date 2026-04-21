@@ -48,7 +48,7 @@ export function useExplanationStream() {
       close();
       setState({ ...INITIAL, status: "streaming", statusMessage: "Connecting…" });
 
-      const encoded = encodeURIComponent(filePath);
+      const encoded = filePath.split("/").map(encodeURIComponent).join("/");
       const url = `${API}/explain/${jobId}/${encoded}`;
       const es = new EventSource(url);
       esRef.current = es;
