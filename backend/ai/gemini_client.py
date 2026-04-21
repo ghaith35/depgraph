@@ -26,7 +26,7 @@ async def stream_explanation(
     url = f"{_API_BASE}/{_GEMINI_MODEL}:streamGenerateContent?key={api_key}&alt=sse"
 
     payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "generationConfig": {"maxOutputTokens": 1500, "temperature": 0.3},
     }
