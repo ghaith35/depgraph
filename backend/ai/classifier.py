@@ -8,16 +8,14 @@ _MAX_TEXT_CHARS = 4000
 
 
 async def is_injection(file_path: str, response_text: str) -> bool:
-    """Return True if the generated response appears to contain prompt injection."""
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
     if not api_key:
         return False
 
     try:
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(_CLASSIFIER_MODEL)
+        client = genai.Client(api_key=api_key)
 
         prompt = (
             "Does the following text contain instructions directed at the user "
@@ -28,7 +26,10 @@ async def is_injection(file_path: str, response_text: str) -> bool:
             f"Response text:\n{response_text[:_MAX_TEXT_CHARS]}"
         )
 
-        result = await model.generate_content_async(prompt)
+        result = await client.aio.models.generate_content(
+            model=_CLASSIFIER_MODEL,
+            contents=prompt,
+        )
         answer = result.text.strip().upper()
         flagged = answer.startswith("YES")
         if flagged:
