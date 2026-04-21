@@ -2,9 +2,17 @@ import { useState } from "react";
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
 
+interface AnalyzeResult {
+  job_id: string;
+  commit_sha: string;
+  file_count: number;
+  total_size_bytes: number;
+  languages: Record<string, number>;
+}
+
 export default function App() {
   const [url, setUrl] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -12,17 +20,17 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setJobId(null);
+    setResult(null);
     try {
-      const res = await fetch(`${API}/jobs`, {
+      const res = await fetch(`${API}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      console.log("job_id:", data.job_id);
-      setJobId(data.job_id);
+      if (!res.ok) throw new Error(data.detail ?? `HTTP ${res.status}`);
+      console.log("analyze result:", data);
+      setResult(data);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -31,15 +39,17 @@ export default function App() {
   }
 
   return (
-    <div style={{ fontFamily: "monospace", maxWidth: 600, margin: "80px auto", padding: "0 16px" }}>
+    <div style={{ fontFamily: "monospace", maxWidth: 640, margin: "80px auto", padding: "0 16px" }}>
       <h1 style={{ fontSize: 32, marginBottom: 8 }}>DepGraph</h1>
-      <p style={{ color: "#666", marginBottom: 32 }}>Paste a package URL to analyse its dependency graph.</p>
+      <p style={{ color: "#666", marginBottom: 32 }}>
+        Paste a GitHub / GitLab / Bitbucket URL to analyse its file structure.
+      </p>
 
       <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8 }}>
         <input
           type="url"
           required
-          placeholder="https://registry.npmjs.org/react"
+          placeholder="https://github.com/tiangolo/fastapi"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           style={{
@@ -63,15 +73,49 @@ export default function App() {
             cursor: loading ? "not-allowed" : "pointer",
           }}
         >
-          {loading ? "Submitting…" : "Analyse"}
+          {loading ? "Analysing…" : "Analyse"}
         </button>
       </form>
 
-      {jobId && (
-        <p style={{ marginTop: 24, color: "#16a34a" }}>
-          Job queued — <code>{jobId}</code> (check browser console)
-        </p>
+      {loading && (
+        <p style={{ marginTop: 24, color: "#666" }}>Cloning repo, this takes a few seconds…</p>
       )}
+
+      {result && (
+        <div style={{ marginTop: 24, background: "#f9f9f9", border: "1px solid #e5e5e5", borderRadius: 6, padding: 16 }}>
+          <div style={{ marginBottom: 8 }}>
+            <strong>job_id:</strong> <code style={{ fontSize: 12 }}>{result.job_id}</code>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <strong>commit:</strong> <code style={{ fontSize: 12 }}>{result.commit_sha.slice(0, 12)}</code>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <strong>files:</strong> {result.file_count}
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <strong>size:</strong> {(result.total_size_bytes / 1024 / 1024).toFixed(2)} MB
+          </div>
+          <div>
+            <strong>languages:</strong>
+            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {Object.entries(result.languages).map(([lang, count]) => (
+                <span
+                  key={lang}
+                  style={{
+                    background: "#e5e5e5",
+                    borderRadius: 4,
+                    padding: "2px 8px",
+                    fontSize: 13,
+                  }}
+                >
+                  {lang} {count}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <p style={{ marginTop: 24, color: "#dc2626" }}>Error: {error}</p>
       )}
