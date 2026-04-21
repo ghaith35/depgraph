@@ -7,8 +7,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_GEMINI_MODEL = "gemini-1.5-flash"
-_API_BASE = "https://generativelanguage.googleapis.com/v1/models"
+_GEMINI_MODEL = "gemini-2.5-flash"
+# Use v1beta for streamGenerateContent with gemini-2.5-flash on free tier
+_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
 def _require_key() -> str:
@@ -22,6 +23,10 @@ async def stream_explanation(
     system_prompt: str,
     user_prompt: str,
 ) -> AsyncIterator[str]:
+    """
+    Stream AI explanation from Gemini 1.5 Flash via Google Generative Language API.
+    Uses v1beta endpoint which supports streamGenerateContent for this model.
+    """
     api_key = _require_key()
     url = f"{_API_BASE}/{_GEMINI_MODEL}:streamGenerateContent?key={api_key}&alt=sse"
 
@@ -35,7 +40,9 @@ async def stream_explanation(
         async with client.stream("POST", url, json=payload) as response:
             if response.status_code != 200:
                 body = await response.aread()
-                raise RuntimeError(f"Gemini API error {response.status_code}: {body.decode()[:200]}")
+                error_msg = body.decode()[:500]
+                logger.error(f"Gemini API error {response.status_code}: {error_msg}")
+                raise RuntimeError(f"Gemini API error {response.status_code}: {error_msg}")
 
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):
@@ -48,5 +55,6 @@ async def stream_explanation(
                     text = chunk["candidates"][0]["content"]["parts"][0]["text"]
                     if text:
                         yield text
-                except (KeyError, IndexError, json.JSONDecodeError):
+                except (KeyError, IndexError, json.JSONDecodeError) as e:
+                    logger.debug(f"Skipped malformed SSE chunk: {e}")
                     continue
