@@ -3,23 +3,32 @@ import atexit
 import logging
 import os
 import re
+import resource
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, AsyncIterator, Optional
 
-import time
 import httpx
+import orjson
 import pathspec
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from graph.builder import build_graph
-from graph.cycles import build_digraph, detect_cycles, annotate_graph
+
+from graph.builder import build_graph, parse_one_file, resolve_imports_batch
+from graph.context import build_context
+from graph.cycles import annotate_graph, build_digraph, detect_cycles
 from graph.setup import generate_setup
-from app.schemas import AnalysisResult, Graph, Node, Edge, RepoStats, CycleReport, SetupSteps
+from app.schemas import (
+    AnalysisResult, CycleReport, Edge, Graph, Node, RepoStats, SetupSteps,
+)
+from pipeline.job import Job
+from pipeline.manager import StreamJobManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -93,46 +102,30 @@ class FileEntry:
 # ---------------------------------------------------------------------------
 
 def validate_url(raw: str) -> ValidatedRepo:
-    # Reject SSH-style
     if raw.startswith("git@") or raw.startswith("ssh://"):
         raise HTTPException(400, "SSH URLs are not supported; use HTTPS.")
-
-    # Reject non-https
     if not raw.startswith("https://"):
         raise HTTPException(400, "Only https:// URLs are accepted.")
-
-    # Reject embedded credentials (user:pass@host)
     host_part = raw[len("https://"):].split("/")[0]
     if "@" in host_part:
         raise HTTPException(400, "URLs with embedded credentials are not allowed.")
-
-    # Reject dangerous characters before regex (belt + suspenders)
     for bad in ["..", "\x00", ";", "&", "|", "`", "$", "(", ")", "<", ">", "?"]:
         if bad in raw:
             raise HTTPException(400, f"URL contains disallowed character: {bad!r}")
-
-    # Reject query strings / fragments
     if "?" in raw or "#" in raw:
         raise HTTPException(400, "Query strings and fragments are not allowed.")
-
-    # Allowlist regex
     if not _URL_RE.match(raw):
         raise HTTPException(
             400,
             "URL must be a public github.com, gitlab.com, or bitbucket.org HTTPS URL."
         )
-
-    # Parse
     without_scheme = raw[len("https://"):]
     parts = without_scheme.strip("/").split("/")
     host = parts[0]
     owner = parts[1]
     repo_name = parts[2]
     branch = parts[4] if len(parts) >= 5 and parts[3] == "tree" else None
-
-    # Canonical clone URL (strip /tree/... suffix)
     clone_url = f"https://{host}/{owner}/{repo_name}"
-
     return ValidatedRepo(host=host, owner=owner, repo=repo_name, url=clone_url, branch=branch)
 
 
@@ -162,7 +155,7 @@ async def check_repo_accessible(vr: ValidatedRepo) -> None:
 _clone_semaphore: Optional[asyncio.Semaphore] = None
 
 
-def _get_semaphore() -> asyncio.Semaphore:
+def _get_clone_semaphore() -> asyncio.Semaphore:
     global _clone_semaphore
     if _clone_semaphore is None:
         _clone_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CLONES)
@@ -170,7 +163,6 @@ def _get_semaphore() -> asyncio.Semaphore:
 
 
 def _dir_size(path: Path) -> int:
-    """Fast recursive size sum with early-exit."""
     total = 0
     for dirpath, _, filenames in os.walk(path):
         for fname in filenames:
@@ -184,12 +176,11 @@ def _dir_size(path: Path) -> int:
 
 
 def _sync_clone(clone_url: str, dest: Path, job_id: str) -> str:
-    """Blocking clone. Returns commit_sha. Raises HTTPException on failure."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_HOOKS_PATH"] = "/dev/null"
-    env["HOME"] = "/tmp"            # prevent ~/.gitconfig credential helpers
-    env["GIT_ASKPASS"] = "echo"     # extra guard against interactive prompts
+    env["HOME"] = "/tmp"
+    env["GIT_ASKPASS"] = "echo"
 
     cmd = [
         "git", "clone",
@@ -208,7 +199,6 @@ def _sync_clone(clone_url: str, dest: Path, job_id: str) -> str:
         text=True,
         timeout=MAX_CLONE_TIMEOUT,
         env=env,
-        # Never shell=True — list form prevents injection
     )
 
     if result.returncode != 0:
@@ -221,7 +211,6 @@ def _sync_clone(clone_url: str, dest: Path, job_id: str) -> str:
             raise HTTPException(400, "Repository is empty.")
         raise HTTPException(502, f"Clone failed: {result.stderr[:300]}")
 
-    # Size check — must happen before we do anything with files
     total_bytes = _dir_size(dest)
     if total_bytes > MAX_REPO_SIZE_BYTES:
         raise HTTPException(
@@ -229,7 +218,6 @@ def _sync_clone(clone_url: str, dest: Path, job_id: str) -> str:
             f"Repository exceeds 50 MB limit ({total_bytes // (1024*1024)} MB)."
         )
 
-    # Commit SHA — use --git-dir, never cd into repo
     sha_result = subprocess.run(
         ["git", "--git-dir", str(dest / ".git"), "rev-parse", "HEAD"],
         capture_output=True, text=True, timeout=5, env=env,
@@ -240,7 +228,7 @@ def _sync_clone(clone_url: str, dest: Path, job_id: str) -> str:
 
 
 async def shallow_clone(vr: ValidatedRepo, dest: Path, job_id: str) -> str:
-    sem = _get_semaphore()
+    sem = _get_clone_semaphore()
     async with sem:
         try:
             return await asyncio.to_thread(_sync_clone, vr.url, dest, job_id)
@@ -278,7 +266,6 @@ def discover_files(repo_root: Path) -> list[FileEntry]:
     count = 0
 
     for dirpath, dirnames, filenames in os.walk(repo_root, followlinks=False):
-        # Prune excluded dirs in-place (modifying dirnames controls descent)
         dirnames[:] = [
             d for d in dirnames
             if d not in EXCLUDED_DIRS and not d.startswith(".")
@@ -286,8 +273,6 @@ def discover_files(repo_root: Path) -> list[FileEntry]:
 
         for fname in filenames:
             fpath = Path(dirpath) / fname
-
-            # Path traversal guard — every file resolved against repo root
             try:
                 resolved = fpath.resolve()
                 if not resolved.is_relative_to(resolved_root):
@@ -296,12 +281,10 @@ def discover_files(repo_root: Path) -> list[FileEntry]:
             except (OSError, ValueError):
                 continue
 
-            # Excluded extensions
             suffix = fpath.suffix.lower()
             if suffix in EXCLUDED_EXTENSIONS:
                 continue
 
-            # Per-file size cap (1 MB)
             try:
                 size = fpath.stat().st_size
             except OSError:
@@ -309,7 +292,6 @@ def discover_files(repo_root: Path) -> list[FileEntry]:
             if size > 1024 * 1024:
                 continue
 
-            # gitignore
             if spec:
                 try:
                     rel = str(fpath.relative_to(repo_root))
@@ -318,7 +300,6 @@ def discover_files(repo_root: Path) -> list[FileEntry]:
                 except ValueError:
                     pass
 
-            # Binary heuristic
             if _is_binary(fpath):
                 continue
 
@@ -337,10 +318,10 @@ def discover_files(repo_root: Path) -> list[FileEntry]:
 
 
 # ---------------------------------------------------------------------------
-# JobManager
+# Filesystem job dir manager
 # ---------------------------------------------------------------------------
 
-class JobManager:
+class FsJobManager:
     def __init__(self) -> None:
         JOBS_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -361,8 +342,11 @@ class JobManager:
             logger.info("Cleaned up all jobs in %s", JOBS_ROOT)
 
 
-job_manager = JobManager()
-atexit.register(job_manager.cleanup_all)
+fs_jobs = FsJobManager()
+atexit.register(fs_jobs.cleanup_all)
+
+# In-memory SSE job registry
+stream_jobs = StreamJobManager()
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -378,10 +362,166 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def on_startup() -> None:
+    asyncio.create_task(_memory_watchdog())
+    asyncio.create_task(_evict_expired_jobs())
+
+
 @app.on_event("shutdown")
 def on_shutdown() -> None:
-    job_manager.cleanup_all()
+    fs_jobs.cleanup_all()
 
+
+# ---------------------------------------------------------------------------
+# Background tasks
+# ---------------------------------------------------------------------------
+
+async def _memory_watchdog() -> None:
+    while True:
+        await asyncio.sleep(30)
+        try:
+            rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Linux: KB; macOS: bytes
+            rss_mb = rss_kb / 1024 if os.uname().sysname != "Darwin" else rss_kb / 1024 / 1024
+            if rss_mb > 400:
+                logger.warning("High RSS memory: %.0f MB", rss_mb)
+        except Exception:
+            pass
+
+
+async def _evict_expired_jobs() -> None:
+    while True:
+        await asyncio.sleep(120)
+        stream_jobs.evict_expired()
+
+
+# ---------------------------------------------------------------------------
+# SSE pipeline runner
+# ---------------------------------------------------------------------------
+
+def _sse_frame(event_type: str, data: Any) -> str:
+    return f"event: {event_type}\ndata: {orjson.dumps(data).decode()}\n\n"
+
+
+async def _run_pipeline(job: Job, url: str, job_dir: Path) -> None:
+    """Full analysis pipeline. Puts SSE frames (str) or None (EOF) into job.queue."""
+    repo_dest = job_dir / "repo"
+    t_start = time.monotonic()
+    job.status = "running"
+
+    async def put(event_type: str, data: Any) -> None:
+        frame = _sse_frame(event_type, data)
+        try:
+            await asyncio.wait_for(job.queue.put(frame), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Queue full for job %s, dropping %s", job.job_id, event_type)
+
+    try:
+        # Stage 1: validate
+        await put("status", {"phase": "validating", "message": "Validating URL…"})
+        vr = validate_url(url.strip())
+        await check_repo_accessible(vr)
+
+        # Stage 2: clone
+        await put("status", {"phase": "cloning", "message": f"Cloning {vr.url}…"})
+        commit_sha = await shallow_clone(vr, repo_dest, job.job_id)
+
+        # Stage 3: discover files
+        await put("status", {"phase": "discovering", "message": "Discovering files…"})
+        files = await asyncio.to_thread(discover_files, repo_dest)
+        total_files = len(files)
+        all_file_paths = {f.path for f in files}
+        await put("progress", {"done": 0, "total": total_files, "phase": "parsing"})
+
+        # Stage 4: build language context
+        ctx = await asyncio.to_thread(build_context, repo_dest, all_file_paths)
+
+        # Stage 5: parse files → emit nodes
+        await put("status", {"phase": "parsing", "message": f"Parsing {total_files} files…"})
+        nodes_list: list[dict] = []
+        file_imports: dict[str, tuple[list, bool]] = {}
+
+        for i, entry in enumerate(files):
+            node_dict, raw_imports, parse_error = await asyncio.to_thread(
+                parse_one_file, entry, repo_dest
+            )
+            nodes_list.append(node_dict)
+            file_imports[entry.path] = (raw_imports, parse_error)
+            await put("node", node_dict)
+            if (i + 1) % 25 == 0 or (i + 1) == total_files:
+                await put("progress", {"done": i + 1, "total": total_files, "phase": "parsing"})
+
+        # Stage 6: resolve imports → emit edges
+        await put("status", {"phase": "resolving", "message": "Resolving imports…"})
+        edges_list: list[dict] = await asyncio.to_thread(
+            resolve_imports_batch, file_imports, ctx, all_file_paths
+        )
+        for edge_dict in edges_list:
+            await put("edge", edge_dict)
+
+        # Stage 7: cycle detection → annotate + emit cycles
+        await put("status", {"phase": "cycles", "message": "Detecting cycles…"})
+        G = build_digraph(nodes_list, edges_list)
+        cycle_report, cycle_node_ids, cycle_edge_pairs = detect_cycles(G)
+        annotate_graph(nodes_list, edges_list, cycle_node_ids, cycle_edge_pairs)
+
+        for scc in cycle_report.sccs:
+            await put("cycle", {"nodes": scc})
+
+        # Stage 8: setup instructions
+        await put("status", {"phase": "setup", "message": "Detecting project setup…"})
+        setup = await asyncio.to_thread(generate_setup, repo_dest, all_file_paths)
+        await put("setup", setup.model_dump())
+
+        # Stage 9: stats
+        total_size = sum(f.size for f in files)
+        lang_counts: dict[str, int] = {}
+        for f in files:
+            lang_counts[f.language_hint] = lang_counts.get(f.language_hint, 0) + 1
+        duration_ms = int((time.monotonic() - t_start) * 1000)
+
+        await put("stats", {
+            "file_count": len(files),
+            "total_size_bytes": total_size,
+            "total_loc": 0,
+            "languages": lang_counts,
+            "commit_sha": commit_sha,
+            "repo_url": vr.url,
+            "analysis_duration_ms": duration_ms,
+        })
+
+        await put("done", {"job_id": job.job_id})
+        job.status = "done"
+
+        logger.info(
+            "Pipeline done job_id=%s files=%d nodes=%d edges=%d cycles=%d duration=%dms",
+            job.job_id, len(files), len(nodes_list), len(edges_list),
+            cycle_report.scc_count, duration_ms,
+        )
+
+    except HTTPException as exc:
+        await put("error", {"message": exc.detail, "status_code": exc.status_code})
+        job.status = "error"
+    except Exception as exc:
+        logger.exception("Pipeline error job_id=%s", job.job_id)
+        await put("error", {"message": str(exc)})
+        job.status = "error"
+    finally:
+        # Put EOF sentinel so the stream endpoint can exit cleanly
+        try:
+            await asyncio.wait_for(job.queue.put(None), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+        fs_jobs.cleanup(job.job_id)
+        # Keep the job in stream_jobs for 30 s so the client can drain the queue
+        await asyncio.sleep(30)
+        stream_jobs.remove(job.job_id)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/healthz")
 def healthz():
@@ -403,77 +543,42 @@ class AnalyzeRequest(BaseModel):
     url: str
 
 
-@app.post("/analyze", response_model=AnalysisResult)
-async def analyze(body: AnalyzeRequest) -> AnalysisResult:
+@app.post("/analyze")
+async def analyze(body: AnalyzeRequest):
+    """Start an analysis job. Returns job_id. Stream results via GET /stream/{job_id}."""
     job_id = str(uuid.uuid4())
-    job_dir = job_manager.create_job_dir(job_id)
-    repo_dest = job_dir / "repo"
-    t_start = time.monotonic()
+    job_dir = fs_jobs.create_job_dir(job_id)
+    job = stream_jobs.create(job_id)
+    asyncio.create_task(_run_pipeline(job, body.url, job_dir))
+    return {"job_id": job_id, "status": "queued"}
 
-    try:
-        # Stage 1 — validate URL
-        vr = validate_url(body.url.strip())
-        await check_repo_accessible(vr)
 
-        # Stage 2 — clone
-        commit_sha = await shallow_clone(vr, repo_dest, job_id)
+@app.get("/stream/{job_id}")
+async def stream(job_id: str):
+    """SSE stream for a running analysis job."""
+    job = stream_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found or expired.")
 
-        # Stage 3 — discover files
-        files = await asyncio.to_thread(discover_files, repo_dest)
+    async def event_generator() -> AsyncIterator[str]:
+        while True:
+            try:
+                frame = await asyncio.wait_for(job.queue.get(), timeout=15.0)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            except Exception:
+                break
 
-        # Stage 4 — parse + build graph (raw dicts)
-        raw = await asyncio.to_thread(build_graph, repo_dest, files)
-        nodes_d: list[dict] = raw["nodes"]
-        edges_d: list[dict] = raw["edges"]
+            if frame is None:  # EOF sentinel
+                break
+            yield frame
 
-        # Stage 5 — cycle detection
-        G = build_digraph(nodes_d, edges_d)
-        cycle_report, cycle_node_ids, cycle_edge_pairs = detect_cycles(G)
-        annotate_graph(nodes_d, edges_d, cycle_node_ids, cycle_edge_pairs)
-
-        # Stage 6 — setup instructions
-        all_file_paths = {f.path for f in files}
-        setup = await asyncio.to_thread(generate_setup, repo_dest, all_file_paths)
-
-        # Stage 7 — stats
-        total_size = sum(f.size for f in files)
-        total_loc = sum(n.get("size", 0) * 20 for n in nodes_d)  # reverse LOC/20
-        lang_counts: dict[str, int] = {}
-        for f in files:
-            lang_counts[f.language_hint] = lang_counts.get(f.language_hint, 0) + 1
-
-        duration_ms = int((time.monotonic() - t_start) * 1000)
-
-        logger.info(
-            "Analysis complete job_id=%s files=%d nodes=%d edges=%d cycles=%d commit=%s duration=%dms",
-            job_id, len(files), len(nodes_d), len(edges_d),
-            cycle_report.scc_count, commit_sha, duration_ms,
-        )
-
-        return AnalysisResult(
-            job_id=job_id,
-            stats=RepoStats(
-                file_count=len(files),
-                total_size_bytes=total_size,
-                total_loc=total_loc,
-                languages=lang_counts,
-                commit_sha=commit_sha,
-                repo_url=vr.url,
-                analysis_duration_ms=duration_ms,
-            ),
-            graph=Graph(
-                nodes=[Node(**n) for n in nodes_d],
-                edges=[Edge(**e) for e in edges_d],
-            ),
-            cycles=cycle_report,
-            setup=setup,
-            unresolved_imports_count=0,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Unexpected error job_id=%s", job_id)
-        raise HTTPException(500, f"Internal error: {exc}")
-    finally:
-        job_manager.cleanup(job_id)
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering on Render
+        },
+    )

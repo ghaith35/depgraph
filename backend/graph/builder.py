@@ -129,3 +129,88 @@ def build_graph(repo_root: Path, files: list) -> dict:
                 })
 
     return {"nodes": nodes, "edges": edges}
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 helpers — used by the streaming pipeline
+# ---------------------------------------------------------------------------
+
+def parse_one_file(entry, repo_root: Path) -> tuple[dict, list, bool]:
+    """Parse a single file. Returns (node_dict, raw_imports, parse_error).
+    Safe to call from any thread (no shared mutable state).
+    """
+    suffix = Path(entry.path).suffix.lower()
+    handler = _HANDLERS.get(suffix)
+
+    abs_path = repo_root / entry.path
+    try:
+        source = abs_path.read_bytes()
+    except OSError as exc:
+        logger.warning("Cannot read %s: %s", entry.path, exc)
+        source = b""
+
+    parse_error = False
+    raw_imports: list = []
+    if handler and source:
+        raw_imports, parse_error = handler.extract_imports(source)
+
+    loc = _loc(source) if source else 1
+    node_dict = {
+        "id": entry.path,
+        "label": Path(entry.path).name,
+        "language": entry.language_hint,
+        "size": _size_node(loc),
+        "is_cycle": False,
+        "cluster": _cluster(entry.path),
+        "parse_error": parse_error,
+    }
+    return node_dict, raw_imports, parse_error
+
+
+def resolve_imports_batch(
+    file_imports: dict[str, tuple[list, bool]],
+    ctx,
+    all_file_paths: set[str],
+) -> list[dict]:
+    """Resolve all raw imports collected during parsing into edge dicts."""
+    edges: list[dict] = []
+
+    for file_path, (raw_imports, _) in file_imports.items():
+        suffix = Path(file_path).suffix.lower()
+        handler = _HANDLERS.get(suffix)
+        if handler is None:
+            continue
+
+        seen_targets: set[str] = set()
+
+        for raw in raw_imports:
+            if raw.is_dynamic:
+                continue
+
+            if hasattr(handler, "resolve_import_all"):
+                targets = handler.resolve_import_all(raw, file_path, ctx)
+            else:
+                t = handler.resolve_import(raw, file_path, ctx)
+                targets = [t] if t else []
+
+            for target in targets:
+                if not target:
+                    continue
+                target = target.replace("\\", "/")
+                if target not in all_file_paths:
+                    continue
+                if target == file_path:
+                    continue
+                if target in seen_targets:
+                    continue
+                seen_targets.add(target)
+                edges.append({
+                    "source": file_path,
+                    "target": target,
+                    "type": "import",
+                    "is_cycle": False,
+                    "symbol": raw.symbol,
+                    "line": raw.line,
+                })
+
+    return edges
