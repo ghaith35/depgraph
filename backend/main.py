@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 JOBS_ROOT = Path("/tmp/jobs")
 MAX_REPO_SIZE_BYTES = 50 * 1024 * 1024   # 50 MB
 MAX_FILE_COUNT = 5000
-MAX_CLONE_TIMEOUT = 30                    # seconds
+MAX_CLONE_TIMEOUT = 60                    # seconds
 MAX_CONCURRENT_CLONES = 2
 HEAD_CHECK_TIMEOUT = 3.0                  # seconds
 MAX_TOTAL_TMP_BYTES = 200 * 1024 * 1024  # 200 MB across all jobs
@@ -233,7 +233,7 @@ async def shallow_clone(vr: ValidatedRepo, dest: Path, job_id: str) -> str:
         try:
             return await asyncio.to_thread(_sync_clone, vr.url, dest, job_id)
         except subprocess.TimeoutExpired:
-            raise HTTPException(504, "Clone timed out after 30 seconds.")
+            raise HTTPException(504, "Clone timed out after 60 seconds.")
 
 
 # ---------------------------------------------------------------------------
