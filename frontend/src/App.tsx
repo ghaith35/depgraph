@@ -2,12 +2,30 @@ import { useState } from "react";
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
 
+interface Edge {
+  source: string;
+  target: string;
+  type: string;
+  symbol: string | null;
+  line: number;
+}
+
+interface Node {
+  id: string;
+  label: string;
+  language: string;
+  size: number;
+  cluster: string;
+  parse_error: boolean;
+}
+
 interface AnalyzeResult {
   job_id: string;
   commit_sha: string;
   file_count: number;
   total_size_bytes: number;
-  languages: Record<string, number>;
+  nodes: Node[];
+  edges: Edge[];
 }
 
 export default function App() {
@@ -92,25 +110,25 @@ export default function App() {
           <div style={{ marginBottom: 8 }}>
             <strong>files:</strong> {result.file_count}
           </div>
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 8 }}>
             <strong>size:</strong> {(result.total_size_bytes / 1024 / 1024).toFixed(2)} MB
           </div>
+          <div style={{ marginBottom: 8 }}>
+            <strong>nodes:</strong> {result.nodes.length} &nbsp;
+            <strong>edges:</strong> {result.edges.length}
+          </div>
           <div>
-            <strong>languages:</strong>
-            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {Object.entries(result.languages).map(([lang, count]) => (
-                <span
-                  key={lang}
-                  style={{
-                    background: "#e5e5e5",
-                    borderRadius: 4,
-                    padding: "2px 8px",
-                    fontSize: 13,
-                  }}
-                >
-                  {lang} {count}
-                </span>
+            <strong>sample edges:</strong>
+            <div style={{ marginTop: 6, fontSize: 12, maxHeight: 200, overflowY: "auto" }}>
+              {result.edges.slice(0, 20).map((e, i) => (
+                <div key={i} style={{ padding: "2px 0", borderBottom: "1px solid #eee" }}>
+                  <code>{e.source}</code> → <code>{e.target}</code>
+                  {e.symbol && <span style={{ color: "#666" }}> ({e.symbol})</span>}
+                </div>
               ))}
+              {result.edges.length > 20 && (
+                <div style={{ color: "#999", marginTop: 4 }}>…and {result.edges.length - 20} more</div>
+              )}
             </div>
           </div>
         </div>
