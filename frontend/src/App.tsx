@@ -185,9 +185,25 @@ export default function App() {
           flexShrink: 0,
         }}
       >
-        <span style={{ fontWeight: 700, fontSize: 17, flexShrink: 0 }}>
+        <button
+          onClick={() => {
+            setUrl("");
+            setSelectedNodeId(null);
+            setHighlightedNodes(null);
+          }}
+          style={{
+            fontWeight: 700,
+            fontSize: 17,
+            flexShrink: 0,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "inherit",
+            padding: 0,
+          }}
+        >
           DepGraph
-        </span>
+        </button>
 
         <form
           onSubmit={handleSubmit}
