@@ -57,7 +57,7 @@ export function GraphView({
   };
 
   return (
-    <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+    <div style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden" }}>
       {activeRenderer === "meta" ? (
         <MetaGraph {...sharedProps} />
       ) : activeRenderer === "canvas" ? (

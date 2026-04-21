@@ -143,7 +143,7 @@ export default function App() {
       {/* ── Body ── */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* Canvas area with progress bar overlay */}
-        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        <div style={{ flex: 1, position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <ProgressBar
             loading={loading}
             statusMsg={statusMsg}
