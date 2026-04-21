@@ -30,6 +30,15 @@ from app.schemas import (
 from pipeline.job import Job
 from pipeline.manager import StreamJobManager, stream_jobs as _stream_jobs_singleton
 from routers.explain import router as explain_router
+from cache.analysis import (
+    get_analysis, set_analysis, get_cached_commit,
+    in_process_lru, evict_until_under_budget,
+    lru_hits, lru_misses, disk_hits, disk_misses, evictions_total,
+    count_files, sum_sizes,
+)
+import cache.analysis as analysis_cache
+from middleware.rate_limit import rate_limiter
+from fastapi import Request
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -369,6 +378,7 @@ app.include_router(explain_router)
 async def on_startup() -> None:
     asyncio.create_task(_memory_watchdog())
     asyncio.create_task(_evict_expired_jobs())
+    asyncio.create_task(_janitor_loop())
 
 
 @app.on_event("shutdown")
@@ -397,6 +407,58 @@ async def _evict_expired_jobs() -> None:
     while True:
         await asyncio.sleep(120)
         stream_jobs.evict_expired()
+
+
+async def _janitor_loop() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await asyncio.to_thread(evict_until_under_budget)
+            rate_limiter.cleanup_stale()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Cache-serve: replay a cached AnalysisResult as SSE events
+# ---------------------------------------------------------------------------
+
+async def _serve_from_cache(job: Job, result: AnalysisResult) -> None:
+    job.status = "running"
+
+    async def put(event_type: str, data: Any) -> None:
+        frame = _sse_frame(event_type, data)
+        try:
+            await asyncio.wait_for(job.queue.put(frame), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+
+    try:
+        await put("status", {"phase": "cached", "message": "Loading from cache…"})
+        for node in result.graph.nodes:
+            await put("node", node.model_dump())
+        for edge in result.graph.edges:
+            await put("edge", edge.model_dump())
+        for scc in result.cycles.sccs:
+            await put("cycle", {"nodes": scc})
+        await put("setup", result.setup.model_dump())
+        await put("stats", result.stats.model_dump())
+        await put("done", {"job_id": job.job_id})
+        job.status = "done"
+        job.analysis_result = result
+        job.repo_dir = None  # repo not available from cache
+    except Exception as exc:
+        logger.exception("cache_serve_error job_id=%s", job.job_id)
+        await put("error", {"message": str(exc)})
+        job.status = "error"
+    finally:
+        try:
+            await asyncio.wait_for(job.queue.put(None), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+        if job.status != "done":
+            await asyncio.sleep(5)
+            stream_jobs.remove(job.job_id)
 
 
 # ---------------------------------------------------------------------------
@@ -511,6 +573,9 @@ async def _run_pipeline(job: Job, url: str, job_dir: Path) -> None:
         )
         job.repo_dir = repo_dest
 
+        # Cache result for future requests
+        asyncio.create_task(set_analysis(job.analysis_result))
+
         logger.info(
             "Pipeline done job_id=%s files=%d nodes=%d edges=%d cycles=%d duration=%dms",
             job.job_id, len(files), len(nodes_list), len(edges_list),
@@ -567,13 +632,80 @@ class AnalyzeRequest(BaseModel):
 
 
 @app.post("/analyze")
-async def analyze(body: AnalyzeRequest):
+async def analyze(body: AnalyzeRequest, request: Request):
     """Start an analysis job. Returns job_id. Stream results via GET /stream/{job_id}."""
+    # Rate limiting
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host or "unknown")
+    allowed, retry_after = rate_limiter.allow(ip)
+    if not allowed:
+        raise HTTPException(
+            429,
+            detail=f"Rate limit: 5 analyses per hour. Retry in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # Pre-validate URL before creating job resources
+    try:
+        vr = validate_url(body.url.strip())
+    except HTTPException:
+        raise
+
+    # Check cache before cloning
+    cached_sha = get_cached_commit(vr.url)
+    if cached_sha:
+        cached_result = await get_analysis(vr.url, cached_sha)
+        if cached_result:
+            job_id = str(uuid.uuid4())
+            job = stream_jobs.create(job_id)
+            asyncio.create_task(_serve_from_cache(job, cached_result))
+            logger.info("cache_hit_serve job_id=%s repo=%s", job_id, vr.url)
+            return {"job_id": job_id, "status": "cached"}
+
     job_id = str(uuid.uuid4())
     job_dir = fs_jobs.create_job_dir(job_id)
     job = stream_jobs.create(job_id)
     asyncio.create_task(_run_pipeline(job, body.url, job_dir))
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/metrics")
+async def metrics():
+    """Operational metrics — cache hit rates, memory, active jobs."""
+    try:
+        rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        rss_mb = rss_kb / 1024 if os.uname().sysname != "Darwin" else rss_kb / 1024 / 1024
+    except Exception:
+        rss_mb = 0
+
+    total_lru = analysis_cache.lru_hits + analysis_cache.lru_misses
+    total_disk = analysis_cache.disk_hits + analysis_cache.disk_misses
+
+    return {
+        "cache": {
+            "lru": {
+                "size": in_process_lru.size(),
+                "hits": analysis_cache.lru_hits,
+                "misses": analysis_cache.lru_misses,
+                "hit_rate": round(analysis_cache.lru_hits / max(1, total_lru), 3),
+            },
+            "disk": {
+                "analyses_count": count_files("/tmp/cache/analyses"),
+                "explanations_count": count_files("/tmp/cache/explanations"),
+                "total_bytes": sum_sizes("/tmp/cache"),
+                "hits": analysis_cache.disk_hits,
+                "misses": analysis_cache.disk_misses,
+                "hit_rate": round(analysis_cache.disk_hits / max(1, total_disk), 3),
+            },
+            "evictions_total": analysis_cache.evictions_total,
+        },
+        "jobs": {
+            "active": len(stream_jobs._jobs),
+        },
+        "memory": {
+            "rss_mb": round(rss_mb, 1),
+        },
+    }
 
 
 @app.get("/stream/{job_id}")

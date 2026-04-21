@@ -1,8 +1,6 @@
 import asyncio
-import hashlib
 import logging
 import urllib.parse
-from pathlib import Path
 from typing import AsyncIterator
 
 import orjson
@@ -13,23 +11,15 @@ from ai.classifier import is_injection
 from ai.gemini_client import stream_explanation
 from ai.prompt_builder import build_prompt, estimate_tokens
 from ai.scrubber import scrub
+from cache.analysis import get_explanation, set_explanation
 from pipeline.manager import stream_jobs
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-CACHE_DIR = Path("/tmp/cache/explanations")
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {orjson.dumps(data).decode()}\n\n"
-
-
-def _cache_key(commit_sha: str, file_path: str, raw_content: str) -> str:
-    content_sha = hashlib.sha256(raw_content.encode()).hexdigest()[:16]
-    raw = f"{commit_sha}:{file_path}:{content_sha}"
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 @router.get("/explain/{job_id}/{file_path:path}")
@@ -70,18 +60,13 @@ async def explain(job_id: str, file_path: str):
             yield _sse("ai.redacted", {"count": scrub_result.count})
 
         # Cache lookup (keyed on commit SHA + file path + content hash)
-        key = _cache_key(result.stats.commit_sha, file_path, raw_content)
-        cache_file = CACHE_DIR / f"{key}.txt"
-        if cache_file.exists():
-            try:
-                cached = cache_file.read_text()
-                logger.info("Cache hit for %s", file_path)
-                for i in range(0, len(cached), 80):
-                    yield _sse("ai.token", {"text": cached[i:i + 80]})
-                yield _sse("ai.done", {})
-                return
-            except OSError:
-                pass  # fall through to fresh generation
+        cached = get_explanation(result.stats.commit_sha, file_path, raw_content)
+        if cached:
+            logger.info("expl_cache_hit path=%s", file_path)
+            for i in range(0, len(cached), 80):
+                yield _sse("ai.token", {"text": cached[i:i + 80]})
+            yield _sse("ai.done", {})
+            return
 
         # Build prompt from scrubbed content
         try:
@@ -153,8 +138,8 @@ async def explain(job_id: str, file_path: str):
 
         # Cache successful, clean response
         try:
-            cache_file.write_text(complete_text)
-        except OSError:
+            set_explanation(result.stats.commit_sha, file_path, raw_content, complete_text)
+        except Exception:
             pass
 
         yield _sse("ai.done", {})
