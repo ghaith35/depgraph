@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { ExplanationRenderer } from "./ExplanationRenderer";
 import { useExplanationStream } from "../hooks/useExplanationStream";
 import { Edge, Node, SetupSteps, Stats } from "../graph/types";
@@ -117,7 +117,9 @@ export function Sidebar({
   };
 
   // Reset explanation when selected node changes
-  const prevNodeId = selectedNode?.id;
+  useEffect(() => {
+    resetExpl();
+  }, [selectedNode?.id, resetExpl]);
 
   return (
     <div
