@@ -13,6 +13,7 @@ interface SidebarProps {
   stats: Stats | null;
   onSelectNode: (id: string) => void;
   onHighlightCycle: (nodes: string[] | null) => void;
+  darkMode?: boolean;
 }
 
 function nodeId(n: string | Node): string {
@@ -47,13 +48,19 @@ function CopyButton({ text }: { text: string }) {
 function Section({
   title,
   children,
+  darkMode = false,
 }: {
   title: string;
   children: ReactNode;
+  darkMode?: boolean;
 }) {
   const [open, setOpen] = useState(true);
+  const border = darkMode ? "#30363d" : "#e5e7eb";
+  const text = darkMode ? "#e6edf3" : "#111827";
+  const textSubtle = darkMode ? "#8b949e" : "#6b7280";
+
   return (
-    <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 12, marginBottom: 4 }}>
+    <div style={{ borderTop: `1px solid ${border}`, paddingTop: 12, marginBottom: 4 }}>
       <div
         onClick={() => setOpen((v) => !v)}
         style={{
@@ -64,10 +71,11 @@ function Section({
           display: "flex",
           justifyContent: "space-between",
           userSelect: "none",
+          color: text,
         }}
       >
         <span>{title}</span>
-        <span style={{ color: "#9ca3af", fontSize: 11 }}>{open ? "▲" : "▼"}</span>
+        <span style={{ color: textSubtle, fontSize: 11 }}>{open ? "▲" : "▼"}</span>
       </div>
       {open && children}
     </div>
@@ -107,6 +115,7 @@ export function Sidebar({
   stats,
   onSelectNode,
   onHighlightCycle,
+  darkMode = false,
 }: SidebarProps) {
   const hasContent = selectedNode || setup || cycles.length > 0;
   const { state: expl, explain, reset: resetExpl } = useExplanationStream();
@@ -121,28 +130,39 @@ export function Sidebar({
     resetExpl();
   }, [selectedNode?.id, resetExpl]);
 
+  // Theme colors
+  const bg = darkMode ? "#0d1117" : "#fafafa";
+  const panelBg = darkMode ? "#161b22" : "#ffffff";
+  const border = darkMode ? "#30363d" : "#e5e7eb";
+  const text = darkMode ? "#e6edf3" : "#111827";
+  const textSubtle = darkMode ? "#8b949e" : "#6b7280";
+  const codeBg = darkMode ? "#0d1117" : "#f3f4f6";
+  const codeBorder = darkMode ? "#30363d" : "#e5e7eb";
+  const linkColor = darkMode ? "#58a6ff" : "#2563eb";
+
   return (
     <div
       style={{
         width: 360,
         minWidth: 360,
-        borderLeft: "1px solid #e5e7eb",
+        borderLeft: `1px solid ${border}`,
         padding: "12px 14px",
         overflowY: "auto",
         fontFamily: "monospace",
         fontSize: 13,
-        background: "#fafafa",
+        background: bg,
+        color: text,
       }}
     >
       {!hasContent && (
-        <div style={{ color: "#9ca3af", marginTop: 8 }}>
+        <div style={{ color: textSubtle, marginTop: 8 }}>
           Click a node to inspect it.
         </div>
       )}
 
       {/* ── Selected file ── */}
       {selectedNode && (
-        <Section title="Selected file">
+        <Section title="Selected file" darkMode={darkMode}>
           <div style={{ marginBottom: 6 }}>
             {stats?.repo_url && stats?.commit_sha ? (
               <a
@@ -313,7 +333,7 @@ export function Sidebar({
 
                 {/* Streaming / done text */}
                 {expl.text && expl.status !== "replaced" && (
-                  <ExplanationRenderer text={expl.text} />
+                  <ExplanationRenderer text={expl.text} darkMode={darkMode} />
                 )}
 
                 {/* Streaming cursor */}
@@ -393,7 +413,7 @@ export function Sidebar({
 
       {/* ── Setup ── */}
       {setup && (
-        <Section title={`Setup · ${setup.runtime}`}>
+        <Section title={`Setup · ${setup.runtime}`} darkMode={darkMode}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {setup.install_cmd && (
               <CommandLine label="Install" cmd={setup.install_cmd} color="#16a34a" />
@@ -425,7 +445,7 @@ export function Sidebar({
 
       {/* ── Cycles ── */}
       {cycles.length > 0 && (
-        <Section title={`Cycles (${cycles.length})`}>
+        <Section title={`Cycles (${cycles.length})`} darkMode={darkMode}>
           {cycles.map((scc, i) => (
             <div
               key={i}

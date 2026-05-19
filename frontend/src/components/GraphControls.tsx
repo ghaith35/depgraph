@@ -5,6 +5,7 @@ interface Props {
   onChange: (f: FilterState) => void;
   nodeCount: number;
   activeRenderer: string;
+  darkMode?: boolean;
 }
 
 export function GraphControls({
@@ -12,10 +13,21 @@ export function GraphControls({
   onChange,
   nodeCount,
   activeRenderer,
+  darkMode = false,
 }: Props) {
   function toggle(key: keyof FilterState) {
     onChange({ ...filters, [key]: !filters[key] });
   }
+
+  const bg = darkMode ? "#0d1117" : "#ffffff";
+  const panelBg = darkMode ? "rgba(13, 17, 23, 0.95)" : "rgba(255, 255, 255, 0.95)";
+  const border = darkMode ? "#30363d" : "#e5e7eb";
+  const text = darkMode ? "#e6edf3" : "#111827";
+  const textSubtle = darkMode ? "#8b949e" : "#6b7280";
+  const inputBg = darkMode ? "#0d1117" : "#ffffff";
+  const inputBorder = darkMode ? "#30363d" : "#d1d5db";
+  const inputText = darkMode ? "#e6edf3" : "#111827";
+  const btnHover = darkMode ? "#1c2128" : "#f3f4f6";
 
   return (
     <div
@@ -24,8 +36,8 @@ export function GraphControls({
         top: 8,
         right: 8,
         zIndex: 10,
-        background: "rgba(255,255,255,0.95)",
-        border: "1px solid #e5e7eb",
+        background: panelBg,
+        border: `1px solid ${border}`,
         borderRadius: 6,
         padding: "8px 10px",
         fontSize: 11,
@@ -34,43 +46,45 @@ export function GraphControls({
         flexDirection: "column",
         gap: 5,
         minWidth: 170,
+        backdropFilter: "blur(10px)",
       }}
     >
-      <div
-        style={{ fontWeight: 600, marginBottom: 2, color: "#374151" }}
-      >
+      <div style={{ fontWeight: 600, marginBottom: 2, color: text }}>
         Filters
       </div>
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: text }}>
         <input
           type="checkbox"
           checked={filters.hideTests}
           onChange={() => toggle("hideTests")}
+          style={{ accentColor: "#2563eb" }}
         />
         Hide test files
       </label>
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: text }}>
         <input
           type="checkbox"
           checked={filters.hideInfrastructure}
           onChange={() => toggle("hideInfrastructure")}
+          style={{ accentColor: "#2563eb" }}
         />
         Hide infrastructure
       </label>
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: text }}>
         <input
           type="checkbox"
           checked={filters.onlyCycles}
           onChange={() => toggle("onlyCycles")}
+          style={{ accentColor: "#2563eb" }}
         />
         Show only cycles
       </label>
 
-      <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 5, marginTop: 2 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4, color: "#374151" }}>
+      <div style={{ borderTop: `1px solid ${border}`, paddingTop: 5, marginTop: 2 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4, color: text }}>
           Renderer
         </div>
         <select
@@ -87,9 +101,12 @@ export function GraphControls({
           style={{
             width: "100%",
             fontSize: 11,
-            padding: "2px 4px",
-            border: "1px solid #d1d5db",
+            padding: "4px 6px",
+            border: `1px solid ${inputBorder}`,
             borderRadius: 4,
+            background: inputBg,
+            color: inputText,
+            cursor: "pointer",
           }}
         >
           <option value="auto">Auto</option>
@@ -97,7 +114,7 @@ export function GraphControls({
           <option value="canvas">Canvas</option>
           <option value="meta">Meta-graph</option>
         </select>
-        <div style={{ marginTop: 4, color: "#9ca3af" }}>
+        <div style={{ marginTop: 4, color: textSubtle, fontSize: 10 }}>
           {nodeCount} nodes · {activeRenderer}
         </div>
       </div>
@@ -105,14 +122,21 @@ export function GraphControls({
       <button
         onClick={() => onChange(DEFAULT_FILTERS)}
         style={{
-          marginTop: 2,
-          padding: "2px 6px",
+          marginTop: 4,
+          padding: "4px 8px",
           fontSize: 10,
-          border: "1px solid #e5e7eb",
+          border: `1px solid ${inputBorder}`,
           borderRadius: 4,
-          background: "white",
+          background: inputBg,
+          color: textSubtle,
           cursor: "pointer",
-          color: "#6b7280",
+          transition: "all 0.2s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = btnHover;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = inputBg;
         }}
       >
         Reset

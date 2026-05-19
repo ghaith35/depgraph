@@ -26,15 +26,22 @@ const rehypePlugins = [[rehypeSanitize, sanitizeSchema]] as const;
 
 interface Props {
   text: string;
+  darkMode?: boolean;
 }
 
-export function ExplanationRenderer({ text }: Props) {
+export function ExplanationRenderer({ text, darkMode = false }: Props) {
+  const textColor = darkMode ? "#e6edf3" : "#1f2937";
+  const codeBlockBg = darkMode ? "#0d1117" : "#f3f4f6";
+  const codeBorder = darkMode ? "#30363d" : "#e5e7eb";
+  const linkColor = darkMode ? "#58a6ff" : "#2563eb";
+  const linkHover = darkMode ? "#79c0ff" : "#1d4ed8";
+
   return (
     <div
       style={{
         fontSize: 12,
         lineHeight: 1.6,
-        color: "#1f2937",
+        color: textColor,
         fontFamily: "system-ui, sans-serif",
       }}
     >
@@ -48,7 +55,7 @@ export function ExplanationRenderer({ text }: Props) {
               target="_blank"
               rel="noopener noreferrer"
               title={href}
-              style={{ color: "#2563eb", wordBreak: "break-all" }}
+              style={{ color: linkColor, wordBreak: "break-all" }}
               onClick={(e) => e.stopPropagation()}
             >
               {children}
@@ -77,12 +84,13 @@ export function ExplanationRenderer({ text }: Props) {
               return (
                 <pre
                   style={{
-                    background: "#f3f4f6",
+                    background: codeBlockBg,
                     borderRadius: 4,
                     padding: "6px 8px",
                     overflowX: "auto",
                     fontSize: 11,
                     margin: "4px 0",
+                    border: `1px solid ${codeBorder}`,
                   }}
                 >
                   <code>{children}</code>
@@ -92,7 +100,7 @@ export function ExplanationRenderer({ text }: Props) {
             return (
               <code
                 style={{
-                  background: "#f3f4f6",
+                  background: codeBlockBg,
                   borderRadius: 3,
                   padding: "1px 4px",
                   fontSize: 11,

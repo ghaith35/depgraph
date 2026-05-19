@@ -11,3 +11,4 @@ dist/
 
 # OS
 .DS_Store
+test_gemini_local.py

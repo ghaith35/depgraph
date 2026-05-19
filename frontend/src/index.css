@@ -1,2 +1,26 @@
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; overflow: hidden; }
+
+body { 
+  margin: 0; 
+  overflow: hidden;
+  background: #ffffff;
+  color: #111827;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+  }
+}
+
+/* Color scheme support */
+:root {
+  color-scheme: light;
+}
+
+:root[style*="color-scheme: dark"] {
+  color-scheme: dark;
+}

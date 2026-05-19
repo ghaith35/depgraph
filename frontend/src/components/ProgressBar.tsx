@@ -4,10 +4,17 @@ interface Props {
   loading: boolean;
   statusMsg: string | null;
   progress: Progress | null;
+  darkMode?: boolean;
 }
 
-export function ProgressBar({ loading, statusMsg, progress }: Props) {
+export function ProgressBar({ loading, statusMsg, progress, darkMode = false }: Props) {
   if (!loading) return null;
+
+  const bg = darkMode ? "#0d1117" : "#ffffff";
+  const border = darkMode ? "#30363d" : "#e5e7eb";
+  const text = darkMode ? "#8b949e" : "#6b7280";
+  const progressBg = darkMode ? "#21262d" : "#e5e7eb";
+  const progressFill = darkMode ? "#58a6ff" : "#1a1a1a";
 
   const pct =
     progress && progress.total > 0
@@ -22,14 +29,15 @@ export function ProgressBar({ loading, statusMsg, progress }: Props) {
         left: 0,
         right: 0,
         zIndex: 10,
-        background: "rgba(255,255,255,0.96)",
+        background: darkMode ? "rgba(13, 17, 23, 0.96)" : "rgba(255, 255, 255, 0.96)",
         padding: "8px 12px",
-        borderBottom: "1px solid #e5e7eb",
+        borderBottom: `1px solid ${border}`,
+        backdropFilter: "blur(10px)",
       }}
     >
       <div
         style={{
-          background: "#e5e7eb",
+          background: progressBg,
           borderRadius: 4,
           height: 4,
           overflow: "hidden",
@@ -37,7 +45,7 @@ export function ProgressBar({ loading, statusMsg, progress }: Props) {
       >
         <div
           style={{
-            background: "#1a1a1a",
+            background: progressFill,
             height: "100%",
             width: `${pct}%`,
             transition: "width 0.15s ease",
@@ -49,7 +57,7 @@ export function ProgressBar({ loading, statusMsg, progress }: Props) {
           style={{
             marginTop: 4,
             fontSize: 11,
-            color: "#6b7280",
+            color: text,
             fontFamily: "monospace",
           }}
         >

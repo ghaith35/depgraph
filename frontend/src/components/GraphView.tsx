@@ -16,6 +16,7 @@ interface Props {
   highlightedNodes: Set<string> | null;
   onSelectNode: (id: string | null) => void;
   onHoverNode: (node: Node | null, x: number, y: number) => void;
+  darkMode?: boolean;
 }
 
 export function GraphView({
@@ -27,6 +28,7 @@ export function GraphView({
   highlightedNodes,
   onSelectNode,
   onHoverNode,
+  darkMode = false,
 }: Props) {
   // Mark outlier hubs (mutates node objects — stable across renders)
   useMemo(() => {
@@ -66,20 +68,23 @@ export function GraphView({
         <GraphCanvas {...sharedProps} />
       )}
 
-      {/* Legend */}
+      {/* Legend — only show when nodes exist */}
       {filteredNodes.length > 0 && (
         <div style={{ position: "absolute", bottom: 12, left: 12, zIndex: 5 }}>
           <LanguageLegend nodes={filteredNodes} />
         </div>
       )}
 
-      {/* Controls */}
-      <GraphControls
-        filters={filters}
-        onChange={onFiltersChange}
-        nodeCount={filteredNodes.length}
-        activeRenderer={activeRenderer}
-      />
+      {/* Controls (Filters) — only show when nodes exist */}
+      {filteredNodes.length > 0 && (
+        <GraphControls
+          filters={filters}
+          onChange={onFiltersChange}
+          nodeCount={filteredNodes.length}
+          activeRenderer={activeRenderer}
+          darkMode={darkMode}
+        />
+      )}
     </div>
   );
 }

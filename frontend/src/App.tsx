@@ -187,9 +187,7 @@ export default function App() {
       >
         <button
           onClick={() => {
-            setUrl("");
-            setSelectedNodeId(null);
-            setHighlightedNodes(null);
+            window.location.href = "/";
           }}
           style={{
             fontWeight: 700,
@@ -333,6 +331,7 @@ export default function App() {
             loading={loading}
             statusMsg={statusMsg}
             progress={progress}
+            darkMode={darkMode}
           />
 
           {/* Landing empty state — only when nothing is happening */}
@@ -437,6 +436,7 @@ export default function App() {
             highlightedNodes={highlightedNodes}
             onSelectNode={setSelectedNodeId}
             onHoverNode={handleHoverNode}
+            darkMode={darkMode}
           />
         </div>
 
@@ -451,6 +451,7 @@ export default function App() {
           stats={stats}
           onSelectNode={setSelectedNodeId}
           onHighlightCycle={handleHighlightCycle}
+          darkMode={darkMode}
         />
       </div>
 
